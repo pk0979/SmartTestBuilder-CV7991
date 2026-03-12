@@ -54,11 +54,12 @@ def generate_questions_with_ai(api_key, subject, chapter, nb, th, vd, vdc):
         "generationConfig": {"response_mime_type": "application/json"}
     }
     
-    # Danh sách các phiên bản AI dự phòng (từ mới nhất đến cũ hơn)
-    # Hệ thống sẽ tự quét tìm phiên bản nào phù hợp với API Key của bạn
+    # Danh sách các phiên bản AI dự phòng
     models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-8b", "gemini-1.5-pro"]
     
+    last_error = ""
     for model in models:
+        # Đường link URL chuẩn xác
         url = f"[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/){model}:generateContent?key={api_key}"
         try:
             response = requests.post(url, headers=headers, json=data)
@@ -67,14 +68,14 @@ def generate_questions_with_ai(api_key, subject, chapter, nb, th, vd, vdc):
                 result = result.replace('```json', '').replace('```', '').strip()
                 return json.loads(result)
             elif response.status_code == 404:
-                continue # Nếu bị báo lỗi 404 (Không tìm thấy model), tự động bỏ qua và thử model tiếp theo
+                continue # Bỏ qua model lỗi, tìm model tiếp theo
             else:
-                st.error(f"Lỗi API ({model}): {response.text}")
-                return None
+                last_error = response.text
         except Exception as e:
-            continue # Bỏ qua lỗi kết nối mạng tạm thời
+            last_error = str(e)
+            continue
             
-    st.error("❌ Lỗi: API Key của bạn không hỗ trợ các model Gemini hiện tại. Hãy tạo Project mới trên Google AI Studio.")
+    st.error(f"❌ Lỗi kết nối AI: {last_error}")
     return None
 
 # --- HÀM AI PHÂN BỔ MA TRẬN ---
@@ -206,10 +207,8 @@ with st.sidebar:
     api_key = st.text_input("Nhập Gemini API Key", type="password", help="Dùng để sinh câu hỏi tự động.")
     st.caption("Lấy key miễn phí tại: [Google AI Studio](https://aistudio.google.com/)")
 
-# Quy trình 4 bước
 tab1, tab2, tab3, tab4 = st.tabs(["📁 1. Dữ liệu", "✨ 2. Sinh Câu Hỏi AI", "🤖 3. Lập Ma Trận", "🖨️ 4. Xuất Bản"])
 
-# TAB 1: NHẬP DỮ LIỆU TỪ EXCEL
 with tab1:
     col1, col2 = st.columns([1, 1])
     with col1:
@@ -234,7 +233,6 @@ with tab1:
                 st.session_state.db_df = pd.DataFrame(columns=['Chuong', 'Muc_do', 'Noi_dung', 'A', 'B', 'C', 'D', 'Dap_an_dung'])
                 st.rerun()
 
-# TAB 2: AI TẠO CÂU HỎI MỚI
 with tab2:
     st.subheader("Trợ lý AI - Tạo mới câu hỏi lấp đầy ma trận")
     st.markdown("Nếu ngân hàng của bạn thiếu câu hỏi (Đặc biệt là mức độ Vận dụng cao), hãy yêu cầu AI tạo ngay lập tức.")
@@ -256,7 +254,7 @@ with tab2:
         elif not chapter_ai:
             st.error("❌ Vui lòng nhập tên Chủ đề/Chương cần tạo.")
         else:
-            with st.spinner('🤖 AI đang suy nghĩ và biên soạn câu hỏi... (có thể mất 10-20 giây)'):
+            with st.spinner('🤖 AI đang suy nghĩ và biên soạn câu hỏi...'):
                 gen_data = generate_questions_with_ai(api_key, subject, chapter_ai, ai_nb, ai_th, ai_vd, ai_vdc)
                 if gen_data:
                     new_ai_df = pd.DataFrame(gen_data)
@@ -264,7 +262,6 @@ with tab2:
                     st.success("🎉 Đã tạo thành công và nạp vào Kho Dữ Liệu! Bạn có thể xem kết quả bên dưới.")
                     st.dataframe(new_ai_df)
 
-# TAB 3: AI PHÂN BỔ MA TRẬN
 with tab3:
     if st.session_state.db_df.empty:
         st.warning("⚠️ Kho dữ liệu đang trống. Hãy qua Tab 1 hoặc Tab 2 để thêm câu hỏi trước.")
@@ -288,7 +285,6 @@ with tab3:
             st.session_state.matrix_df = ai_generate_matrix(st.session_state.db_df, total_questions, ratio)
             st.success("🎉 Đã phân bổ xong! Chuyển sang Tab 4 để xuất đề.")
 
-# TAB 4: TÙY CHỈNH & XUẤT BẢN
 with tab4:
     if st.session_state.matrix_df.empty:
         st.info("👈 Hãy dùng Tab 3 để tự động tạo khung ma trận trước.")
