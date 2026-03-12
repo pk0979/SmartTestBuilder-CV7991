@@ -35,9 +35,6 @@ def style_text(paragraph, text, bold=False, italic=False):
 
 # --- HÀM GỌI GEMINI AI TẠO CÂU HỎI ---
 def generate_questions_with_ai(api_key, subject, chapter, nb, th, vd, vdc):
-    # Đổi tên model thành gemini-1.5-flash-latest
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={api_key}"
-    
     prompt = f"""
     Bạn là một chuyên gia giáo dục tại Việt Nam. Hãy soạn câu hỏi trắc nghiệm môn {subject}, phần/chủ đề "{chapter}" bám sát yêu cầu Công văn 7991/BGDĐT-GDTrH.
     Số lượng: {nb} câu Nhận biết (NB), {th} câu Thông hiểu (TH), {vd} câu Vận dụng (VD), {vdc} câu Vận dụng cao (VDC).
@@ -57,19 +54,28 @@ def generate_questions_with_ai(api_key, subject, chapter, nb, th, vd, vdc):
         "generationConfig": {"response_mime_type": "application/json"}
     }
     
-    try:
-        response = requests.post(url, headers=headers, json=data)
-        if response.status_code == 200:
-            result = response.json()['candidates'][0]['content']['parts'][0]['text']
-            # Dọn dẹp chuỗi JSON đề phòng AI trả về kèm markdown (tránh lỗi giật lag)
-            result = result.replace('```json', '').replace('```', '').strip()
-            return json.loads(result)
-        else:
-            st.error(f"Lỗi API: {response.text}")
-            return None
-    except Exception as e:
-        st.error(f"Lỗi hệ thống hoặc lỗi định dạng JSON: {str(e)}")
-        return None
+    # Danh sách các phiên bản AI dự phòng (từ mới nhất đến cũ hơn)
+    # Hệ thống sẽ tự quét tìm phiên bản nào phù hợp với API Key của bạn
+    models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-8b", "gemini-1.5-pro"]
+    
+    for model in models:
+        url = f"[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/){model}:generateContent?key={api_key}"
+        try:
+            response = requests.post(url, headers=headers, json=data)
+            if response.status_code == 200:
+                result = response.json()['candidates'][0]['content']['parts'][0]['text']
+                result = result.replace('```json', '').replace('```', '').strip()
+                return json.loads(result)
+            elif response.status_code == 404:
+                continue # Nếu bị báo lỗi 404 (Không tìm thấy model), tự động bỏ qua và thử model tiếp theo
+            else:
+                st.error(f"Lỗi API ({model}): {response.text}")
+                return None
+        except Exception as e:
+            continue # Bỏ qua lỗi kết nối mạng tạm thời
+            
+    st.error("❌ Lỗi: API Key của bạn không hỗ trợ các model Gemini hiện tại. Hãy tạo Project mới trên Google AI Studio.")
+    return None
 
 # --- HÀM AI PHÂN BỔ MA TRẬN ---
 def ai_generate_matrix(df, total_q, strategy_ratio):
