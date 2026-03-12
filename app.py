@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import random
 import io
+import json
+import requests
 from docx import Document
 from docx.shared import Pt, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -9,7 +11,6 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 # --- CẤU HÌNH TRANG ---
 st.set_page_config(page_title="EduTest Pro - CV7991", page_icon="🎓", layout="wide")
 
-# Custom CSS để giao diện đẹp hơn
 st.markdown("""
 <style>
     .stMetric { background-color: #f0f2f6; padding: 10px; border-radius: 10px; }
@@ -20,6 +21,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- KHỞI TẠO SESSION STATE ---
+if 'db_df' not in st.session_state:
+    st.session_state.db_df = pd.DataFrame(columns=['Chuong', 'Muc_do', 'Noi_dung', 'A', 'B', 'C', 'D', 'Dap_an_dung'])
 if 'matrix_df' not in st.session_state:
     st.session_state.matrix_df = pd.DataFrame()
 
@@ -30,30 +33,57 @@ def style_text(paragraph, text, bold=False, italic=False):
     run.italic = italic
     return run
 
-# --- HÀM TRÍ TUỆ NHÂN TẠO (AI) PHÂN BỔ MA TRẬN ---
+# --- HÀM GỌI GEMINI AI TẠO CÂU HỎI ---
+def generate_questions_with_ai(api_key, subject, chapter, nb, th, vd, vdc):
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+    
+    prompt = f"""
+    Bạn là một chuyên gia giáo dục tại Việt Nam. Hãy soạn câu hỏi trắc nghiệm môn {subject}, phần/chủ đề "{chapter}" bám sát yêu cầu Công văn 7991/BGDĐT-GDTrH.
+    Số lượng: {nb} câu Nhận biết (NB), {th} câu Thông hiểu (TH), {vd} câu Vận dụng (VD), {vdc} câu Vận dụng cao (VDC).
+    Yêu cầu:
+    - Câu hỏi rõ ràng, khoa học.
+    - 4 phương án A, B, C, D hợp lý, không quá chênh lệch độ dài.
+    Trả về kết quả chuẩn JSON (Array of Objects) với các key sau (không kèm markdown code block):
+    [
+        {{"Chuong": "{chapter}", "Muc_do": "NB", "Noi_dung": "...", "A": "...", "B": "...", "C": "...", "D": "...", "Dap_an_dung": "A"}},
+        ...
+    ]
+    """
+    
+    headers = {'Content-Type': 'application/json'}
+    data = {
+        "contents": [{"parts":[{"text": prompt}]}],
+        "generationConfig": {"response_mime_type": "application/json"}
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=data)
+        if response.status_code == 200:
+            result = response.json()['candidates'][0]['content']['parts'][0]['text']
+            return json.loads(result)
+        else:
+            st.error(f"Lỗi API: {response.text}")
+            return None
+    except Exception as e:
+        st.error(f"Lỗi hệ thống: {str(e)}")
+        return None
+
+# --- HÀM AI PHÂN BỔ MA TRẬN ---
 def ai_generate_matrix(df, total_q, strategy_ratio):
     chapters = df['Chuong'].unique()
     levels = ['NB', 'TH', 'VD', 'VDC']
-    
-    # Tính tổng target theo chiến lược
     targets = {lvl: int(total_q * r / 100) for lvl, r in zip(levels, strategy_ratio)}
-    # Bù trừ sai số làm tròn cho VDC
     targets['VDC'] = total_q - sum([targets[l] for l in ['NB', 'TH', 'VD']])
     
-    # Tạo bảng kế hoạch rỗng
     plan = {ch: {lvl: 0 for lvl in levels} for ch in chapters}
-    
-    # Lấy số lượng câu hỏi tối đa hiện có trong DB
     available = {ch: {lvl: len(df[(df['Chuong'] == ch) & (df['Muc_do'] == lvl)]) for lvl in levels} for ch in chapters}
     
-    # Thuật toán phân bổ đều
     for lvl in levels:
         t = targets[lvl]
         while t > 0:
-            # Kiểm tra xem còn câu hỏi nào ở mức độ này không
             total_avail_lvl = sum([available[ch][lvl] for ch in chapters])
             if total_avail_lvl == 0:
-                st.warning(f"⚠️ Ngân hàng thiếu câu hỏi mức {lvl}! AI chỉ có thể xếp được {targets[lvl] - t}/{targets[lvl]} câu.")
+                st.warning(f"⚠️ Ngân hàng thiếu câu hỏi mức {lvl}! Đã phân bổ được {targets[lvl] - t}/{targets[lvl]} câu.")
                 break
                 
             for ch in chapters:
@@ -62,9 +92,7 @@ def ai_generate_matrix(df, total_q, strategy_ratio):
                     available[ch][lvl] -= 1
                     t -= 1
                     
-    # Chuyển đổi thành DataFrame để hiển thị trên UI
-    matrix_df = pd.DataFrame.from_dict(plan, orient='index')
-    return matrix_df
+    return pd.DataFrame.from_dict(plan, orient='index')
 
 # --- HÀM TRỘN CÂU HỎI ---
 def shuffle_question(row):
@@ -94,7 +122,6 @@ def shuffle_question(row):
 def export_full_exam(exam_list, info, matrix_df):
     doc = Document()
     
-    # Header
     header_table = doc.add_table(rows=1, cols=2)
     header_table.width = Inches(6)
     left_cell = header_table.cell(0, 0).paragraphs[0]
@@ -108,7 +135,6 @@ def export_full_exam(exam_list, info, matrix_df):
 
     doc.add_paragraph("_" * 50).alignment = WD_ALIGN_PARAGRAPH.CENTER
     
-    # Bảng Ma trận đặc tả
     doc.add_paragraph("BẢNG MA TRẬN ĐẶC TẢ ĐỀ KIỂM TRA").runs[0].bold = True
     m_table = doc.add_table(rows=1, cols=6)
     m_table.style = 'Table Grid'
@@ -130,7 +156,6 @@ def export_full_exam(exam_list, info, matrix_df):
         
     doc.add_page_break()
     
-    # Nội dung đề
     doc.add_paragraph(f"ĐỀ KIỂM TRA MÔN {info['subject'].upper()}").runs[0].bold = True
     doc.add_paragraph("\nPHẦN I. TRẮC NGHIỆM").runs[0].bold = True
     
@@ -144,7 +169,6 @@ def export_full_exam(exam_list, info, matrix_df):
             style_text(opt_p, f"{label}. ", bold=True)
             style_text(opt_p, q['Options'][label])
 
-    # Đáp án
     doc.add_page_break()
     doc.add_paragraph("BẢNG ĐÁP ÁN").runs[0].bold = True
     ans_table = doc.add_table(rows=2, cols=len(exam_list))
@@ -158,7 +182,7 @@ def export_full_exam(exam_list, info, matrix_df):
     return bio.getvalue()
 
 # --- UI CHÍNH ---
-st.title("🎓 Hệ Thống Tạo Đề Thông Minh (Chuẩn CV 7991)")
+st.title("🎓 Hệ Thống Tạo Đề & Sinh Câu Hỏi AI (Chuẩn CV 7991)")
 
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/3074/3074058.png", width=100)
@@ -167,69 +191,101 @@ with st.sidebar:
     teacher = st.text_input("Tên giáo viên", "Tống Phước Khải")
     subject = st.text_input("Môn học", "Toán")
     duration = st.number_input("Thời gian (phút)", value=90)
-    st.info("Hệ thống tích hợp AI tự động phân bổ ma trận đặc tả theo chuẩn BGDĐT.")
-
-# Quy trình 3 bước chuyên nghiệp
-tab1, tab2, tab3 = st.tabs(["📁 1. Dữ liệu Ngân hàng", "🤖 2. Trợ lý AI Ma trận", "🖨️ 3. Tùy chỉnh & Xuất bản"])
-
-# TAB 1: NHẬP DỮ LIỆU
-with tab1:
-    st.subheader("Tải lên Ngân hàng câu hỏi của bạn")
-    uploaded_file = st.file_uploader("Định dạng .xlsx (Các cột: Chuong, Muc_do, Noi_dung, A, B, C, D, Dap_an_dung)", type=["xlsx"])
     
-    if uploaded_file:
-        df = pd.read_excel(uploaded_file)
-        st.success(f"✅ Đọc thành công {len(df)} câu hỏi.")
-        
-        # Thống kê nhanh
-        col1, col2, col3, col4 = st.columns(4)
-        stats = df['Muc_do'].value_counts()
-        col1.metric("Nhận biết (NB)", stats.get('NB', 0))
-        col2.metric("Thông hiểu (TH)", stats.get('TH', 0))
-        col3.metric("Vận dụng (VD)", stats.get('VD', 0))
-        col4.metric("Vận dụng cao (VDC)", stats.get('VDC', 0))
-        
-        with st.expander("👁️ Xem trước dữ liệu thô"):
-            st.dataframe(df.head(10))
+    st.divider()
+    st.markdown("🔑 **Khóa API AI (Tùy chọn)**")
+    api_key = st.text_input("Nhập Gemini API Key", type="password", help="Dùng để sinh câu hỏi tự động.")
+    st.caption("Lấy key miễn phí tại: [Google AI Studio](https://aistudio.google.com/)")
 
-# TAB 2: TRỢ LÝ AI
+# Quy trình 4 bước
+tab1, tab2, tab3, tab4 = st.tabs(["📁 1. Dữ liệu", "✨ 2. Sinh Câu Hỏi AI", "🤖 3. Lập Ma Trận", "🖨️ 4. Xuất Bản"])
+
+# TAB 1: NHẬP DỮ LIỆU TỪ EXCEL
+with tab1:
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        st.subheader("Tải lên Ngân hàng câu hỏi")
+        uploaded_file = st.file_uploader("Định dạng .xlsx (Cột: Chuong, Muc_do, Noi_dung, A, B, C, D, Dap_an_dung)", type=["xlsx"])
+        if st.button("Tải vào hệ thống", type="primary"):
+            if uploaded_file:
+                new_df = pd.read_excel(uploaded_file)
+                st.session_state.db_df = pd.concat([st.session_state.db_df, new_df], ignore_index=True).drop_duplicates()
+                st.success("Đã bổ sung câu hỏi vào Kho dữ liệu chung!")
+    with col2:
+        st.subheader("Thống kê Kho Dữ Liệu Hiện Tại")
+        st.info(f"📚 Tổng số câu hỏi trong bộ nhớ: **{len(st.session_state.db_df)}** câu")
+        if not st.session_state.db_df.empty:
+            stats = st.session_state.db_df['Muc_do'].value_counts()
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("NB", stats.get('NB', 0))
+            c2.metric("TH", stats.get('TH', 0))
+            c3.metric("VD", stats.get('VD', 0))
+            c4.metric("VDC", stats.get('VDC', 0))
+            if st.button("🗑️ Xóa sạch bộ nhớ", type="secondary"):
+                st.session_state.db_df = pd.DataFrame(columns=['Chuong', 'Muc_do', 'Noi_dung', 'A', 'B', 'C', 'D', 'Dap_an_dung'])
+                st.rerun()
+
+# TAB 2: AI TẠO CÂU HỎI MỚI
 with tab2:
-    if not uploaded_file:
-        st.warning("⚠️ Vui lòng tải file dữ liệu ở Bước 1 trước.")
-    else:
-        st.subheader("🤖 Trợ lý AI phân bổ cấu trúc đề")
-        st.markdown("Hệ thống sẽ dựa vào dữ liệu khả dụng để tự động chia đều câu hỏi vào các chương.")
+    st.subheader("Trợ lý AI - Tạo mới câu hỏi lấp đầy ma trận")
+    st.markdown("Nếu ngân hàng của bạn thiếu câu hỏi (Đặc biệt là mức độ Vận dụng cao), hãy yêu cầu AI tạo ngay lập tức.")
+    
+    col2_1, col2_2 = st.columns(2)
+    with col2_1:
+        chapter_ai = st.text_input("Nhập tên Chủ đề / Chương (VD: Đạo hàm, Rễ cây...):")
         
+    with col2_2:
+        col_nb, col_th, col_vd, col_vdc = st.columns(4)
+        ai_nb = col_nb.number_input("Số câu NB", min_value=0, value=2)
+        ai_th = col_th.number_input("Số câu TH", min_value=0, value=2)
+        ai_vd = col_vd.number_input("Số câu VD", min_value=0, value=1)
+        ai_vdc = col_vdc.number_input("Số câu VDC", min_value=0, value=1)
+        
+    if st.button("✨ XUẤT XƯỞNG CÂU HỎI MỚI", type="primary"):
+        if not api_key:
+            st.error("❌ Bạn cần nhập 'Gemini API Key' ở thanh Menu bên trái trước.")
+        elif not chapter_ai:
+            st.error("❌ Vui lòng nhập tên Chủ đề/Chương cần tạo.")
+        else:
+            with st.spinner('🤖 AI đang suy nghĩ và biên soạn câu hỏi... (có thể mất 10-20 giây)'):
+                gen_data = generate_questions_with_ai(api_key, subject, chapter_ai, ai_nb, ai_th, ai_vd, ai_vdc)
+                if gen_data:
+                    new_ai_df = pd.DataFrame(gen_data)
+                    st.session_state.db_df = pd.concat([st.session_state.db_df, new_ai_df], ignore_index=True)
+                    st.success("🎉 Đã tạo thành công và nạp vào Kho Dữ Liệu! Bạn có thể xem kết quả bên dưới.")
+                    st.dataframe(new_ai_df)
+
+# TAB 3: AI PHÂN BỔ MA TRẬN
+with tab3:
+    if st.session_state.db_df.empty:
+        st.warning("⚠️ Kho dữ liệu đang trống. Hãy qua Tab 1 hoặc Tab 2 để thêm câu hỏi trước.")
+    else:
+        st.subheader("🤖 AI Tính toán Cấu trúc đề (Ma trận)")
         col_ai1, col_ai2 = st.columns(2)
         with col_ai1:
-            total_questions = st.number_input("Tổng số câu trắc nghiệm muốn tạo:", min_value=1, max_value=200, value=40)
+            total_questions = st.number_input("Tổng số câu trắc nghiệm đề thi:", min_value=1, max_value=200, value=40)
         with col_ai2:
-            strategy = st.selectbox("Chiến lược Ma trận", [
+            strategy = st.selectbox("Chiến lược Ma trận CV7991", [
                 "Chuẩn BGDĐT (40% NB - 30% TH - 20% VD - 10% VDC)",
-                "Cơ bản/GDKT (50% NB - 30% TH - 10% VD - 10% VDC)",
-                "Phân hóa cao (30% NB - 30% TH - 20% VD - 20% VDC)"
+                "Cơ bản (50% NB - 30% TH - 10% VD - 10% VDC)",
+                "Nâng cao (30% NB - 30% TH - 20% VD - 20% VDC)"
             ])
             
-        if st.button("✨ TỰ ĐỘNG PHÂN BỔ BẰNG AI", type="primary"):
+        if st.button("✨ TỰ ĐỘNG LẬP KHUNG MA TRẬN", type="primary"):
             if "Chuẩn" in strategy: ratio = (40, 30, 20, 10)
             elif "Cơ bản" in strategy: ratio = (50, 30, 10, 10)
             else: ratio = (30, 30, 20, 20)
             
-            # Chạy thuật toán
-            st.session_state.matrix_df = ai_generate_matrix(df, total_questions, ratio)
-            st.success("🎉 AI đã tính toán xong! Chuyển sang Bước 3 để xem bảng Đặc tả và Xuất đề.")
+            st.session_state.matrix_df = ai_generate_matrix(st.session_state.db_df, total_questions, ratio)
+            st.success("🎉 Đã phân bổ xong! Chuyển sang Tab 4 để xuất đề.")
 
-# TAB 3: TÙY CHỈNH & XUẤT BẢN
-with tab3:
-    if not uploaded_file:
-        st.warning("⚠️ Vui lòng tải file dữ liệu ở Bước 1 trước.")
-    elif st.session_state.matrix_df.empty:
-        st.info("👈 Hãy dùng Trợ lý AI ở Bước 2 để tự động tạo khung ma trận trước.")
+# TAB 4: TÙY CHỈNH & XUẤT BẢN
+with tab4:
+    if st.session_state.matrix_df.empty:
+        st.info("👈 Hãy dùng Tab 3 để tự động tạo khung ma trận trước.")
     else:
-        st.subheader("Bảng Ma Trận Đặc Tả (Có thể chỉnh sửa trực tiếp)")
-        st.caption("Bạn có thể thay đổi số lượng câu ở từng ô. Cột 'Tổng' sẽ tự động tính.")
+        st.subheader("Bảng Ma Trận Đặc Tả (Có thể tinh chỉnh)")
         
-        # Bảng dữ liệu tương tác
         edited_matrix = st.data_editor(
             st.session_state.matrix_df, 
             use_container_width=True,
@@ -241,7 +297,6 @@ with tab3:
             }
         )
         
-        # Kiểm tra tính hợp lệ
         is_valid = True
         total_selected = int(edited_matrix.sum().sum())
         st.markdown(f"**Tổng số câu chốt:** `{total_selected}` câu.")
@@ -249,21 +304,21 @@ with tab3:
         for chapter, row in edited_matrix.iterrows():
             for lvl in ['NB', 'TH', 'VD', 'VDC']:
                 req = row[lvl]
-                avail = len(df[(df['Chuong'] == chapter) & (df['Muc_do'] == lvl)])
+                avail = len(st.session_state.db_df[(st.session_state.db_df['Chuong'] == chapter) & (st.session_state.db_df['Muc_do'] == lvl)])
                 if req > avail:
-                    st.error(f"❌ {chapter} - Mức {lvl}: Yêu cầu {req} câu nhưng ngân hàng chỉ có {avail} câu!")
+                    st.error(f"❌ Chương '{chapter}' - Mức {lvl}: Cần {req} câu nhưng kho chỉ có {avail} câu! (Mẹo: Qua Tab 2 nhờ AI tạo thêm)")
                     is_valid = False
 
         st.divider()
         if is_valid:
             if st.button("🚀 BỐC ĐỀ & XUẤT FILE WORD", type="primary", use_container_width=True):
-                with st.spinner('Hệ thống đang trộn đề và tạo file Word...'):
+                with st.spinner('Đang trộn phương án và tạo file...'):
                     exam_list = []
                     for chapter, row in edited_matrix.iterrows():
                         for lvl in ['NB', 'TH', 'VD', 'VDC']:
                             count = int(row[lvl])
                             if count > 0:
-                                pool = df[(df['Chuong'] == chapter) & (df['Muc_do'] == lvl)]
+                                pool = st.session_state.db_df[(st.session_state.db_df['Chuong'] == chapter) & (st.session_state.db_df['Muc_do'] == lvl)]
                                 selected = pool.sample(n=count)
                                 for _, q_row in selected.iterrows():
                                     exam_list.append(shuffle_question(q_row))
@@ -273,13 +328,11 @@ with tab3:
                     docx_file = export_full_exam(exam_list, info, edited_matrix)
                     
                     st.balloons()
-                    st.success("✅ Đã tạo thành công! Vui lòng tải file bên dưới.")
+                    st.success("✅ Đã tạo thành công! Hãy tải file bên dưới.")
                     st.download_button(
                         label="📥 TẢI ĐỀ KIỂM TRA & MA TRẬN (.docx)",
                         data=docx_file,
-                        file_name=f"De_Kiem_Tra_{subject}_Pro.docx",
+                        file_name=f"De_Kiem_Tra_{subject}_AI_CV7991.docx",
                         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                         use_container_width=True
                     )
-        else:
-            st.error("Vui lòng chỉnh sửa lại bảng Ma trận hoặc bổ sung câu hỏi vào Excel để có thể Xuất đề.")
