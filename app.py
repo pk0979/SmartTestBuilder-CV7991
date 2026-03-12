@@ -70,7 +70,7 @@ def generate_questions_with_ai(api_key, subject, chapter, q_tn, q_ds, q_tl):
     
     last_error = ""
     for model in models:
-        url = f"[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/){model}:generateContent?key={api_key}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
         try:
             response = requests.post(url, headers=headers, json=data)
             if response.status_code == 200:
@@ -322,7 +322,7 @@ def export_full_exam(exam_list, info):
 st.title("🎓 Hệ Thống Tạo Đề Đa Định Dạng & Ma Trận (CV7991)")
 
 with st.sidebar:
-    st.image("[https://cdn-icons-png.flaticon.com/512/3074/3074058.png](https://cdn-icons-png.flaticon.com/512/3074/3074058.png)", width=100)
+    st.image("https://cdn-icons-png.flaticon.com/512/3074/3074058.png", width=100)
     st.header("⚙️ Thông tin chung")
     coquan = st.text_input("Cơ quan chủ quản", "UBND XÃ VĨNH HẬU")
     school = st.text_input("Tên trường", "TRƯỜNG THCS ĐA PHƯỚC")
