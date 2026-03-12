@@ -59,8 +59,8 @@ def generate_questions_with_ai(api_key, subject, chapter, nb, th, vd, vdc):
     
     last_error = ""
     for model in models:
-        # Đường link URL chuẩn xác
-        url = f"[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/){model}:generateContent?key={api_key}"
+        # Đã xóa bỏ các dấu ngoặc [] và () bị thừa, trả lại link chuẩn
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
         try:
             response = requests.post(url, headers=headers, json=data)
             if response.status_code == 200:
