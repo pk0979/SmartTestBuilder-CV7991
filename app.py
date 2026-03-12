@@ -35,7 +35,8 @@ def style_text(paragraph, text, bold=False, italic=False):
 
 # --- HÀM GỌI GEMINI AI TẠO CÂU HỎI ---
 def generate_questions_with_ai(api_key, subject, chapter, nb, th, vd, vdc):
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+    # Đổi tên model thành gemini-1.5-flash-latest
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={api_key}"
     
     prompt = f"""
     Bạn là một chuyên gia giáo dục tại Việt Nam. Hãy soạn câu hỏi trắc nghiệm môn {subject}, phần/chủ đề "{chapter}" bám sát yêu cầu Công văn 7991/BGDĐT-GDTrH.
@@ -43,7 +44,7 @@ def generate_questions_with_ai(api_key, subject, chapter, nb, th, vd, vdc):
     Yêu cầu:
     - Câu hỏi rõ ràng, khoa học.
     - 4 phương án A, B, C, D hợp lý, không quá chênh lệch độ dài.
-    Trả về kết quả chuẩn JSON (Array of Objects) với các key sau (không kèm markdown code block):
+    Trả về kết quả CHUẨN JSON (Array of Objects) với các key sau. (TUYỆT ĐỐI KHÔNG chứa ký tự markdown như ```json):
     [
         {{"Chuong": "{chapter}", "Muc_do": "NB", "Noi_dung": "...", "A": "...", "B": "...", "C": "...", "D": "...", "Dap_an_dung": "A"}},
         ...
@@ -60,12 +61,14 @@ def generate_questions_with_ai(api_key, subject, chapter, nb, th, vd, vdc):
         response = requests.post(url, headers=headers, json=data)
         if response.status_code == 200:
             result = response.json()['candidates'][0]['content']['parts'][0]['text']
+            # Dọn dẹp chuỗi JSON đề phòng AI trả về kèm markdown (tránh lỗi giật lag)
+            result = result.replace('```json', '').replace('```', '').strip()
             return json.loads(result)
         else:
             st.error(f"Lỗi API: {response.text}")
             return None
     except Exception as e:
-        st.error(f"Lỗi hệ thống: {str(e)}")
+        st.error(f"Lỗi hệ thống hoặc lỗi định dạng JSON: {str(e)}")
         return None
 
 # --- HÀM AI PHÂN BỔ MA TRẬN ---
