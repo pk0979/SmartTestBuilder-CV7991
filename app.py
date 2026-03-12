@@ -69,7 +69,7 @@ def generate_questions_with_ai(api_key, subject, chapter, q_tn, q_ds, q_tl):
     models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-8b", "gemini-1.5-pro"]
     last_error = ""
     for model in models:
-        url = f"[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/){model}:generateContent?key={api_key}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
         try:
             response = requests.post(url, headers=headers, json=data)
             if response.status_code == 200:
@@ -228,7 +228,7 @@ def export_full_exam(exam_list, info):
 st.title("🎓 Hệ Thống Tạo Đề Đa Định Dạng (Form 2025)")
 
 with st.sidebar:
-    st.image("[https://cdn-icons-png.flaticon.com/512/3074/3074058.png](https://cdn-icons-png.flaticon.com/512/3074/3074058.png)", width=100)
+    st.image("https://cdn-icons-png.flaticon.com/512/3074/3074058.png", width=100)
     st.header("⚙️ Thông tin chung")
     school = st.text_input("Tên trường", "THCS Đa Phước")
     teacher = st.text_input("Tên giáo viên", "Tống Phước Khải")
